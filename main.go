@@ -11,20 +11,22 @@ package main
 import (
 	"crypto/md5"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"github.com/bitly/go-simplejson"
 	"github.com/hprose/hprose-go/hprose"
 	"io/ioutil"
+	"math/rand"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type WebWeChat struct {
 	Token   string
 	cookies []*http.Cookie
+	Err     string
 }
 type User_info struct {
 	Nick_name         string
@@ -44,7 +46,10 @@ func main() {
 	service := hprose.NewHttpService()
 	service.AddFunction("WcMessageInfo", WcMessageInfo)
 	service.AddFunction("WcOwnInfo", WcOwnInfo, true)
+	service.AddFunction("WcSendMsg_Text", WcSendMsg_Text)
 	service.AddFunction("WcBand", WcBand)
+	service.AddFunction("GetQrcode", GetQrcode)
+	service.AddFunction("GetAvatar", GetAvatar)
 	var port string = "1245"
 	fmt.Println("开始监听" + port + "端口")
 	http.ListenAndServe(":"+port, service)
@@ -74,13 +79,155 @@ func GetToken(u, p string) (WCahtReqR WebWeChat) {
 	if err != nil {
 		fmt.Println(err.Error())
 	}
-	var respjson map[string]interface{}
-	json.Unmarshal(respbodyByte, &respjson)
+	respjson, _ := simplejson.NewJson(respbodyByte)
+	base := respjson.Get("base_resp")
+	errinfo := base.Get("err_msg").MustString()
+	if errinfo == "need verify code" {
+		WCahtReqR.Err = errinfo
+		return WCahtReqR
+	}
 	WCahtReqR.cookies = resp.Cookies()
-	WCahtReqR.Token = strings.Split(respjson["redirect_url"].(string), "=")[3]
-	return WCahtReqR
+	WCahtReqR.Token = strings.Split(respjson.Get("redirect_url").MustString(), "=")[3]
+	return
 }
+func GetQrcode(u, p, fakeid string) (respbodyByte []byte) {
+	WCahtReqR := GetToken(u, p)
+	var ReqUrl string = "https://mp.weixin.qq.com/misc/getqrcode?fakeid=" + fakeid + "&token=" + WCahtReqR.Token + "&style=1"
+	req, _ := http.NewRequest("GET", ReqUrl, nil)
+	for i := range WCahtReqR.cookies {
+		req.AddCookie(WCahtReqR.cookies[i])
+	}
+	loc := []string{}
+	redirect := func(req *http.Request, via []*http.Request) error {
+		loc = append(loc, req.URL.Path)
+		return fmt.Errorf("重定向取消")
+	}
+	tr := &http.Transport{}
+	client := &http.Client{
+		Transport:     tr,
+		CheckRedirect: redirect,
+	}
+	resp, _ := client.Do(req)
+	respbodyByte, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	return
+}
+func GetAvatar(u, p, fakeid string) (respbodyByte []byte) {
+	WCahtReqR := GetToken(u, p)
+	var ReqUrl string = "https://mp.weixin.qq.com/misc/getheadimg?fakeid=" + fakeid + "&token=" + WCahtReqR.Token + "&style=1"
+	req, _ := http.NewRequest("GET", ReqUrl, nil)
+	for i := range WCahtReqR.cookies {
+		req.AddCookie(WCahtReqR.cookies[i])
+	}
+	loc := []string{}
+	redirect := func(req *http.Request, via []*http.Request) error {
+		loc = append(loc, req.URL.Path)
+		return fmt.Errorf("重定向取消")
+	}
+	tr := &http.Transport{}
+	client := &http.Client{
+		Transport:     tr,
+		CheckRedirect: redirect,
+	}
+	resp, _ := client.Do(req)
+	respbodyByte, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	return
+}
+func WcSendMsg_Text(u, p, content, tofakeid string) bool {
+	WCahtReqR := GetToken(u, p)
+	var ReqUrl string = "https://mp.weixin.qq.com/cgi-bin/singlesend?t=ajax-response&f=json&token=" + WCahtReqR.Token + "&lang=zh_CN"
+	var data string = "token=" + WCahtReqR.Token + "&lang=zh_CN&f=json&ajax=1&type=1&random=0.037916635" + RandM() + "6162031&type=1&content=" + content + "&tofakeid=" + tofakeid + "&imgcode="
+	req, _ := http.NewRequest("POST", ReqUrl, strings.NewReader(data))
+	for i := range WCahtReqR.cookies {
+		req.AddCookie(WCahtReqR.cookies[i])
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	req.Header.Set("Referer", "https://mp.weixin.qq.com/cgi-bin/singlesendpage?t=message/send&action=index&tofakeid=807054600&token="+WCahtReqR.Token+"&lang=zh_CN")
+	loc := []string{}
+	redirect := func(req *http.Request, via []*http.Request) error {
+		loc = append(loc, req.URL.Path)
+		return fmt.Errorf("重定向取消")
+	}
+	tr := &http.Transport{}
+	client := &http.Client{
+		Transport:     tr,
+		CheckRedirect: redirect,
+	}
+	resp, _ := client.Do(req)
+	respbodyByte, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	respjson, _ := simplejson.NewJson(respbodyByte)
+	base := respjson.Get("base_resp")
+	if base.Get("err_msg").MustString() == "ok" {
+		return true
+	}
+	return false
+}
+func WcGroupSendMsg_Text(u, p, content string) bool {
+	var operation_seq string
+	WCahtReqR := GetToken(u, p)
+	var ReqUrl string = "https://mp.weixin.qq.com/cgi-bin/masssendpage?t=mass/send&token=" + WCahtReqR.Token + "&lang=zh_CN&f=json"
+	req, _ := http.NewRequest("GET", ReqUrl, nil)
+	for i := range WCahtReqR.cookies {
+		req.AddCookie(WCahtReqR.cookies[i])
+	}
+	req.Header.Set("Referer", "https://mp.weixin.qq.com/cgi-bin/masssendpage?t=mass/send&token="+WCahtReqR.Token+"&lang=zh_CN")
 
+	client := new(http.Client)
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println(err.Error())
+		os.Exit(0)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == 200 {
+		respdatabyte, _ := ioutil.ReadAll(resp.Body)
+		respjson, err := simplejson.NewJson(respdatabyte)
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+		operation_seqint := respjson.Get("operation_seq").MustInt()
+		operation_seq = strconv.Itoa(operation_seqint)
+	}
+
+	ReqUrl = "https://mp.weixin.qq.com/cgi-bin/masssend?t=ajax-response&token=" + WCahtReqR.Token + "&lang=zh_CN"
+	var data string = "token=" + WCahtReqR.Token + "&lang=zh_CN&f=json&ajax=1&random=0.9823722" + RandM() + "99422729&type=1&content=" + content + "&cardlimit=&sex=&groupid=&synctxweibo=0&country=&province=&city=&imgcode=&operation_seq=" + operation_seq
+	req, _ = http.NewRequest("POST", ReqUrl, strings.NewReader(data))
+	for i := range WCahtReqR.cookies {
+		req.AddCookie(WCahtReqR.cookies[i])
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	req.Header.Set("Referer", "https://mp.weixin.qq.com/cgi-bin/masssendpage?t=mass/send&token="+WCahtReqR.Token+"&lang=zh_CN")
+
+	loc := []string{}
+	redirect := func(req *http.Request, via []*http.Request) error {
+		loc = append(loc, req.URL.Path)
+		return fmt.Errorf("重定向取消")
+	}
+	tr := &http.Transport{}
+	client = &http.Client{
+		Transport:     tr,
+		CheckRedirect: redirect,
+	}
+	resp, _ = client.Do(req)
+	respbodyByte, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	respjson, _ := simplejson.NewJson(respbodyByte)
+	base := respjson.Get("base_resp")
+	if base.Get("err_msg").MustString() == "ok" {
+		return true
+	}
+	return false
+}
 func WcOwnInfo(u, p string) (userinfo User_info) {
 	WCahtReqR := GetToken(u, p)
 	var WcOwnInfoUrlData string = "t=setting/index&action=index&token=" + WCahtReqR.Token + "&lang=zh_CN&f=json"
@@ -125,6 +272,10 @@ func WcOwnInfo(u, p string) (userinfo User_info) {
 }
 func WcMessageInfo(u, p, count, day string) (msgstring string) {
 	WCahtReqR := GetToken(u, p)
+	if WCahtReqR.Err != "" {
+		return "err"
+	}
+	fmt.Println(WCahtReqR.Token)
 	var WcMessageInfoUrlData string = "t=message/list&count=" + count + "&day=" + day + "&token=" + WCahtReqR.Token + "&lang=zh_CN&f=json"
 	var WcMessageInfoUrl string = "https://mp.weixin.qq.com/cgi-bin/message?" + WcMessageInfoUrlData
 	req, _ := http.NewRequest("GET", WcMessageInfoUrl, nil)
@@ -177,6 +328,11 @@ func wcbandresp(WCahtReqR WebWeChat) (msgstring string) {
 }
 func WcBand(u, p, url, token string) bool {
 	WCahtReqR := GetToken(u, p)
+	if WCahtReqR.Err != "" {
+		fmt.Println(u + "登录错误")
+		return false
+	}
+	fmt.Println(WCahtReqR.Token)
 	var operation_seq string = wcbandresp(WCahtReqR)
 	var ReqUrl string = "https://mp.weixin.qq.com/advanced/callbackprofile?t=ajax-response&token=" + WCahtReqR.Token + "&lang=zh_CN"
 	var data string = "callback_token=" + token + "&url=" + url + "&operation_seq=" + operation_seq
@@ -205,9 +361,15 @@ func WcBand(u, p, url, token string) bool {
 			fmt.Println(err.Error())
 		}
 		msgstring := respjson.Get("ret").MustString()
+		fmt.Println(msgstring)
 		if msgstring == "0" {
 			return true
 		}
 	}
 	return false
+}
+func RandM() string {
+	rand.Seed(time.Now().UnixNano())
+	r := rand.Intn(10)
+	return strconv.Itoa(r)
 }
