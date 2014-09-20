@@ -45,16 +45,19 @@ type User_info struct {
 func main() {
 	service := hprose.NewHttpService()
 	service.AddFunction("WcMessageInfo", WcMessageInfo)
-	service.AddFunction("WcOwnInfo", WcOwnInfo, true)
+	service.AddFunction("WcOwnInfo", WcOwnInfo)
 	service.AddFunction("WcSendMsg_Text", WcSendMsg_Text)
+	service.AddFunction("WcGroupSendMsg_Text", WcGroupSendMsg_Text)
 	service.AddFunction("WcBand", WcBand)
 	service.AddFunction("GetQrcode", GetQrcode)
 	service.AddFunction("GetAvatar", GetAvatar)
+	service.AddFunction("GetFollowUserGroup", GetFollowUserGroup)
 	var port string = "1245"
 	fmt.Println("开始监听" + port + "端口")
 	http.ListenAndServe(":"+port, service)
 }
 
+//获取网页Token
 func GetToken(u, p string) (WCahtReqR WebWeChat) {
 	var ReqUrl string = "https://mp.weixin.qq.com/cgi-bin/login"
 	pwdmd5 := md5.New()
@@ -90,6 +93,8 @@ func GetToken(u, p string) (WCahtReqR WebWeChat) {
 	WCahtReqR.Token = strings.Split(respjson.Get("redirect_url").MustString(), "=")[3]
 	return
 }
+
+//获取用户二维码
 func GetQrcode(u, p, fakeid string) (respbodyByte []byte) {
 	WCahtReqR := GetToken(u, p)
 	var ReqUrl string = "https://mp.weixin.qq.com/misc/getqrcode?fakeid=" + fakeid + "&token=" + WCahtReqR.Token + "&style=1"
@@ -114,6 +119,8 @@ func GetQrcode(u, p, fakeid string) (respbodyByte []byte) {
 	}
 	return
 }
+
+//获取用户头像
 func GetAvatar(u, p, fakeid string) (respbodyByte []byte) {
 	WCahtReqR := GetToken(u, p)
 	var ReqUrl string = "https://mp.weixin.qq.com/misc/getheadimg?fakeid=" + fakeid + "&token=" + WCahtReqR.Token + "&style=1"
@@ -138,6 +145,8 @@ func GetAvatar(u, p, fakeid string) (respbodyByte []byte) {
 	}
 	return
 }
+
+//给制定fakeid发送消息
 func WcSendMsg_Text(u, p, content, tofakeid string) bool {
 	WCahtReqR := GetToken(u, p)
 	var ReqUrl string = "https://mp.weixin.qq.com/cgi-bin/singlesend?t=ajax-response&f=json&token=" + WCahtReqR.Token + "&lang=zh_CN"
@@ -170,6 +179,8 @@ func WcSendMsg_Text(u, p, content, tofakeid string) bool {
 	}
 	return false
 }
+
+//发送群消息
 func WcGroupSendMsg_Text(u, p, content string) bool {
 	var operation_seq string
 	WCahtReqR := GetToken(u, p)
@@ -228,6 +239,8 @@ func WcGroupSendMsg_Text(u, p, content string) bool {
 	}
 	return false
 }
+
+//获取用户信息
 func WcOwnInfo(u, p string) (userinfo User_info) {
 	WCahtReqR := GetToken(u, p)
 	var WcOwnInfoUrlData string = "t=setting/index&action=index&token=" + WCahtReqR.Token + "&lang=zh_CN&f=json"
@@ -270,12 +283,58 @@ func WcOwnInfo(u, p string) (userinfo User_info) {
 	}
 	return
 }
-func WcMessageInfo(u, p, count, day string) (msgstring string) {
+
+/*
+返回的结构
+{
+    "msg_item": [
+        {
+            "id": 200716384,
+            "type": 1,
+            "fakeid": "1168435081",
+            "nick_name": "妖精的魅惑",
+            "date_time": 1410941778,
+            "content": "额，不好意思，那我取消关注",
+            "source": "",
+            "msg_status": 4,
+            "has_reply": 0,
+            "refuse_reason": "",
+            "multi_item": [],
+            "to_uin": 3012020639,
+            "send_stat": {
+                "total": 0,
+                "succ": 0,
+                "fail": 0
+            }
+        },
+        {
+            "id": 200716252,
+            "type": 1,
+            "fakeid": "1168435081",
+            "nick_name": "妖精的魅惑",
+            "date_time": 1410939154,
+            "content": "/:,@P记不住全名",
+            "source": "",
+            "msg_status": 4,
+            "has_reply": 0,
+            "refuse_reason": "",
+            "multi_item": [],
+            "to_uin": 3012020639,
+            "send_stat": {
+                "total": 0,
+                "succ": 0,
+                "fail": 0
+            }
+        }
+    ]
+}
+*/
+//最近接受到的消息
+func WcMessageInfo(u, p, count, day string) (msgstring string) { //获取近期信息
 	WCahtReqR := GetToken(u, p)
 	if WCahtReqR.Err != "" {
 		return "err"
 	}
-	fmt.Println(WCahtReqR.Token)
 	var WcMessageInfoUrlData string = "t=message/list&count=" + count + "&day=" + day + "&token=" + WCahtReqR.Token + "&lang=zh_CN&f=json"
 	var WcMessageInfoUrl string = "https://mp.weixin.qq.com/cgi-bin/message?" + WcMessageInfoUrlData
 	req, _ := http.NewRequest("GET", WcMessageInfoUrl, nil)
@@ -300,7 +359,9 @@ func WcMessageInfo(u, p, count, day string) (msgstring string) {
 	}
 	return
 }
-func wcbandresp(WCahtReqR WebWeChat) (msgstring string) {
+
+//用户绑定相关
+func wcbandresp(WCahtReqR WebWeChat) (msgstring string) { //结合绑定使用
 	var ReqUrl string = "https://mp.weixin.qq.com/advanced/advanced?action=interface&t=advanced/interface&token=" + WCahtReqR.Token + "&lang=zh_CN&f=json"
 	req, _ := http.NewRequest("GET", ReqUrl, nil)
 	for i := range WCahtReqR.cookies {
@@ -332,7 +393,6 @@ func WcBand(u, p, url, token string) bool {
 		fmt.Println(u + "登录错误")
 		return false
 	}
-	fmt.Println(WCahtReqR.Token)
 	var operation_seq string = wcbandresp(WCahtReqR)
 	var ReqUrl string = "https://mp.weixin.qq.com/advanced/callbackprofile?t=ajax-response&token=" + WCahtReqR.Token + "&lang=zh_CN"
 	var data string = "callback_token=" + token + "&url=" + url + "&operation_seq=" + operation_seq
@@ -361,12 +421,70 @@ func WcBand(u, p, url, token string) bool {
 			fmt.Println(err.Error())
 		}
 		msgstring := respjson.Get("ret").MustString()
-		fmt.Println(msgstring)
 		if msgstring == "0" {
 			return true
 		}
 	}
 	return false
+}
+
+func GetFollowUser(u, p, page, pageidx string) { //pageidx为第几页,从0开始
+	//WCahtReqR := GetToken(u, p)
+	//var ReqUrl string = "https://mp.weixin.qq.com/cgi-bin/contactmanage?t=user/index&pagesize=" + page + "&pageidx=0&type=0&token=" + WCahtReqR.Token + "&lang=zh_CN&f=json"
+
+}
+
+/*
+返回信息
+{
+    "groups": [
+        {
+            "id": 0,
+            "name": "未分组",
+            "cnt": 6
+        },
+        {
+            "id": 1,
+            "name": "黑名单",
+            "cnt": 0
+        },
+        {
+            "id": 2,
+            "name": "星标组",
+            "cnt": 0
+        },
+        {
+            "id": 100,
+            "name": "内测用户",
+            "cnt": 1
+        }
+    ]
+}
+*/
+func GetFollowUserGroup(u, p, page string) string {
+	WCahtReqR := GetToken(u, p)
+	var ReqUrl string = "https://mp.weixin.qq.com/cgi-bin/contactmanage?t=user/index&pagesize=" + page + "&pageidx=0&type=0&token=" + WCahtReqR.Token + "&lang=zh_CN&f=json"
+	req, _ := http.NewRequest("GET", ReqUrl, nil)
+	for i := range WCahtReqR.cookies {
+		req.AddCookie(WCahtReqR.cookies[i])
+	}
+	client := new(http.Client)
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println(err.Error())
+		os.Exit(0)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == 200 {
+		respdatabyte, _ := ioutil.ReadAll(resp.Body)
+		respjson, err := simplejson.NewJson(respdatabyte)
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+		group_list := respjson.Get("group_list").MustString()
+		return group_list
+	}
+	return "error"
 }
 func RandM() string {
 	rand.Seed(time.Now().UnixNano())
